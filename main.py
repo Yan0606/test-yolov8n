@@ -3,6 +3,7 @@ import easyocr
 from ultralytics import YOLO
 import re
 from db_utils import criar_tabelas, inserir_dados_ficticios, verificar_placa, registrar_log
+import time  # Adicione no topo do arquivo
 
 # Função para listar câmeras disponíveis
 def listar_cameras(max_test=5):
@@ -50,19 +51,22 @@ def detectar_placa(frame):
     results = model(frame)
     found_plate = None
     found_plate_img = None
+    confidence = None
     for r in results:
         for box in r.boxes:
             cls = int(box.cls[0])
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             label = model.names[cls] if hasattr(model, 'names') else str(cls)
             color = (0, 255, 0) if label == 'license_plate' else (255, 0, 0)
+            conf = float(box.conf[0])
+            # Apenas desenha o retângulo, sem texto de label
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
             # Se for placa, recorte para OCR
             if label == 'license_plate':
                 found_plate = (x1, y1, x2, y2)
                 found_plate_img = frame[y1:y2, x1:x2]
-    return found_plate, found_plate_img
+                confidence = conf
+    return found_plate, found_plate_img, confidence
 
 # Função para realizar OCR e tratar texto
 print("Inicializando EasyOCR (isso pode demorar alguns segundos)...")
@@ -93,28 +97,55 @@ print("Banco de dados inicializado com sucesso!")
 
 print("Sistema iniciado com sucesso! Pressione 'q' para sair.")
 
+frame_count = 0
+start_time = time.time()
+ocr_interval = 1  # Realiza OCR a cada 2 frames para aumentar FPS
+
 while True:
     ret, frame = cap.read()
     if not ret:
         break
-    bbox, placa_img = detectar_placa(frame)
-    placa_texto = None
-    status = None
-    nome = None
-    if bbox and placa_img is not None:
+    bbox, placa_img, conf = detectar_placa(frame)
+    frame_count += 1
+
+    elapsed = time.time() - start_time
+    fps = frame_count / elapsed if elapsed > 0 else 0
+
+    # Por padrão, zera as variáveis de exibição
+    exibir_placa = False
+    ultima_placa_texto = None
+    ultima_conf = None
+    ultima_status = None
+    ultima_nome = None
+
+    if bbox and placa_img is not None and frame_count % ocr_interval == 0:
         placa_texto = realizar_ocr(placa_img)
         if placa_texto:
             autorizado, nome = verificar_placa(placa_texto)
             status = 'autorizado' if autorizado else 'negado'
             registrar_log(placa_texto, status)
-            # Desenhar bounding box
-            x1, y1, x2, y2 = bbox
-            cor = (0, 255, 0) if status == 'autorizado' else (0, 0, 255)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), cor, 2)
-            cv2.putText(frame, placa_texto, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, cor, 2)
-            msg = 'ACESSO AUTORIZADO' if status == 'autorizado' else 'NÃO AUTORIZADO'
-            cv2.putText(frame, msg, (x1, y2+30), cv2.FONT_HERSHEY_SIMPLEX, 1, cor, 3)
-            print(f"Placa: {placa_texto} | Status: {msg} | Nome: {nome if nome else '-'}")
+            ultima_placa_texto = placa_texto
+            ultima_conf = conf
+            ultima_status = status
+            ultima_nome = nome
+            exibir_placa = True
+
+    # Só desenha se houver placa reconhecida neste frame
+    if bbox and ultima_placa_texto and exibir_placa:
+        x1, y1, x2, y2 = bbox
+        cor = (0, 255, 0) if ultima_status == 'autorizado' else (0, 0, 255)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), cor, 2)
+        texto_placa = f"{ultima_placa_texto}"
+        texto_conf = f"{(ultima_conf or 0)*100:.1f}%"
+        cv2.putText(frame, texto_placa, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, cor, 2)
+        cv2.putText(frame, texto_conf, (x1, y1-40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+        msg = 'ACESSO AUTORIZADO' if ultima_status == 'autorizado' else 'NAO AUTORIZADO'
+        cv2.putText(frame, msg, (x1, y2+30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, cor, 2)
+        print(f"Placa: {ultima_placa_texto} | Confiança: {(ultima_conf or 0)*100:.1f}% | Status: {msg} | Nome: {ultima_nome if ultima_nome else '-'}")
+
+    # Mostra FPS na tela
+    cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,0), 2)
+
     cv2.imshow('Reconhecimento de Placas', frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break

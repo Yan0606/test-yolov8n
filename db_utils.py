@@ -51,7 +51,7 @@ def inserir_dados_ficticios():
     dados = [
         ('7394EAS', 'Visitante A'),
         ('AMQ4B44', 'Morador B'),
-        ('JKL4321', 'Visitante C')
+        ('CEG8E95', 'Visitante C')
     ]
     for placa, nome in dados:
         try:
