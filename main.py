@@ -4,6 +4,7 @@ from ultralytics import YOLO
 import re
 from db_utils import criar_tabelas, inserir_dados_ficticios, verificar_placa, registrar_log
 import time  # Adicione no topo do arquivo
+import sys  # Adicionado para usar sys.exit()
 
 # Função para listar câmeras disponíveis
 def listar_cameras(max_test=5):
@@ -100,6 +101,7 @@ print("Sistema iniciado com sucesso! Pressione 'q' para sair.")
 frame_count = 0
 start_time = time.time()
 ocr_interval = 1  # Realiza OCR a cada 2 frames para aumentar FPS
+placa_autorizada = False  # Nova variável para controlar se uma placa foi autorizada
 
 while True:
     ret, frame = cap.read()
@@ -129,6 +131,10 @@ while True:
             ultima_status = status
             ultima_nome = nome
             exibir_placa = True
+            
+            # Se a placa for autorizada, marca como autorizada
+            if autorizado:
+                placa_autorizada = True
 
     # Só desenha se houver placa reconhecida neste frame
     if bbox and ultima_placa_texto and exibir_placa:
@@ -145,6 +151,16 @@ while True:
 
     # Mostra FPS na tela
     cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,0), 2)
+
+    # Se uma placa foi autorizada, mostra mensagem e encerra
+    if placa_autorizada:
+        # Adiciona mensagem na tela
+        cv2.putText(frame, "Placa autorizada! Abrindo portao...", (10, frame.shape[0] - 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.imshow('Reconhecimento de Placas', frame)
+        cv2.waitKey(2000)  # Espera 2 segundos para mostrar a mensagem
+        print("\nPlaca autorizada! Abrindo portao...")
+        break
 
     cv2.imshow('Reconhecimento de Placas', frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
